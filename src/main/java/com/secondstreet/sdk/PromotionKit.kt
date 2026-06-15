@@ -5,6 +5,7 @@ import android.content.Intent
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 
 import android.content.Context
 import android.webkit.WebView
@@ -138,11 +139,7 @@ object PromotionKit {
         webView.isScrollContainer = false
         webView.settings.loadWithOverviewMode = true
         webView.settings.useWideViewPort = true
-
-        webView.layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            minHeightPx
-        )
+        webView.minimumHeight = minHeightPx
 
         webView.addJavascriptInterface(object {
             @JavascriptInterface
@@ -191,10 +188,31 @@ object PromotionKit {
                                 .toInt()
                                 .coerceAtLeast(minHeightPx)
                             view.post {
-                                view.layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    px
-                                )
+                                val existing = view.layoutParams
+                                if (existing != null) {
+                                    existing.height = px
+                                    view.layoutParams = existing
+                                } else {
+                                    val newParams = when (val parent = view.parent) {
+                                        is LinearLayout -> LinearLayout.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            px
+                                        )
+                                        is FrameLayout -> FrameLayout.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            px
+                                        )
+                                        is ViewGroup -> ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            px
+                                        )
+                                        else -> ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            px
+                                        )
+                                    }
+                                    view.layoutParams = newParams
+                                }
                                 view.requestLayout()
                             }
                         }
