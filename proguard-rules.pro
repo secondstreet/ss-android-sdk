@@ -1,0 +1,2 @@
+-keep class com.secondstreet.sdk.** { *; }
+-keepclassmembers class com.secondstreet.sdk.** { *; }
