@@ -5,7 +5,12 @@ import android.content.Intent
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.FrameLayout
+
 import android.content.Context
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
+import org.json.JSONObject
 
 object PromotionKit {
 
@@ -112,7 +117,7 @@ object PromotionKit {
     baseUrl: String = "https://promos.secondstreet.com",
     heightDp: Int = 400,
     listener: PromotionListener? = null
-): WebView {
+    ): WebView {
     this.listener = listener
 
     val url = PromotionConfig(
