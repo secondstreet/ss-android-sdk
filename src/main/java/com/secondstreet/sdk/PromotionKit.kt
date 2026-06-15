@@ -3,6 +3,7 @@ package com.secondstreet.sdk
 import android.app.Activity
 import android.content.Intent
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -135,11 +136,70 @@ object PromotionKit {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
 
-        // Enable auto height
-        webView.isScrollContainer = false
+        // Prefer auto-height, but keep WebView scroll as fallback for constrained parents.
+        webView.isScrollContainer = true
+        webView.isVerticalScrollBarEnabled = true
+        webView.isHorizontalScrollBarEnabled = false
+        webView.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
         webView.settings.loadWithOverviewMode = true
         webView.settings.useWideViewPort = true
         webView.minimumHeight = minHeightPx
+
+        fun updateInlineHeight(view: WebView) {
+            view.evaluateJavascript(
+                """
+                (function() {
+                    var body = document.body;
+                    var doc = document.documentElement;
+                    return Math.max(
+                        body ? body.scrollHeight : 0,
+                        body ? body.offsetHeight : 0,
+                        doc ? doc.scrollHeight : 0,
+                        doc ? doc.offsetHeight : 0,
+                        doc ? doc.clientHeight : 0
+                    );
+                })()
+                """.trimIndent()
+            ) { height ->
+                val contentHeight = height
+                    ?.replace("\"", "")
+                    ?.toFloatOrNull()
+                    ?: 0f
+                if (contentHeight > 0) {
+                    val px = (contentHeight * context.resources.displayMetrics.density)
+                        .toInt()
+                        .coerceAtLeast(minHeightPx)
+                    view.post {
+                        val existing = view.layoutParams
+                        if (existing != null) {
+                            existing.height = px
+                            view.layoutParams = existing
+                        } else {
+                            val newParams = when (view.parent) {
+                                is LinearLayout -> LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    px
+                                )
+                                is FrameLayout -> FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    px
+                                )
+                                is ViewGroup -> ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    px
+                                )
+                                else -> ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    px
+                                )
+                            }
+                            view.layoutParams = newParams
+                        }
+                        view.requestLayout()
+                    }
+                }
+            }
+        }
 
         webView.addJavascriptInterface(object {
             @JavascriptInterface
@@ -169,54 +229,7 @@ object PromotionKit {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 if (newProgress == 100) {
-                    view.evaluateJavascript(
-                        """
-                        (function() {
-                            return Math.max(
-                                document.body.scrollHeight,
-                                document.documentElement.scrollHeight
-                            );
-                        })()
-                        """.trimIndent()
-                    ) { height ->
-                        val contentHeight = height
-                            ?.replace("\"", "")
-                            ?.toFloatOrNull()
-                            ?: 0f
-                        if (contentHeight > 0) {
-                            val px = (contentHeight * context.resources.displayMetrics.density)
-                                .toInt()
-                                .coerceAtLeast(minHeightPx)
-                            view.post {
-                                val existing = view.layoutParams
-                                if (existing != null) {
-                                    existing.height = px
-                                    view.layoutParams = existing
-                                } else {
-                                    val newParams = when (val parent = view.parent) {
-                                        is LinearLayout -> LinearLayout.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            px
-                                        )
-                                        is FrameLayout -> FrameLayout.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            px
-                                        )
-                                        is ViewGroup -> ViewGroup.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            px
-                                        )
-                                        else -> ViewGroup.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            px
-                                        )
-                                    }
-                                    view.layoutParams = newParams
-                                }
-                                view.requestLayout()
-                            }
-                        }
-                    }
+                    updateInlineHeight(view)
                 }
             }
         }
@@ -224,6 +237,10 @@ object PromotionKit {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 android.util.Log.d("SS-SDK", "Inline loaded: $url")
+                updateInlineHeight(view)
+                view.postDelayed({ updateInlineHeight(view) }, 250)
+                view.postDelayed({ updateInlineHeight(view) }, 750)
+                view.postDelayed({ updateInlineHeight(view) }, 1500)
                 listener?.onLoad(promoId)
             }
         }
