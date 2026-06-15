@@ -127,10 +127,12 @@ object PromotionKit {
         baseUrl = baseUrl
     ).buildUrl()
 
+    val minHeightPx = (heightDp * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+
     val webView = WebView(context)
     webView.layoutParams = android.view.ViewGroup.LayoutParams(
         android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-        (heightDp * context.resources.displayMetrics.density).toInt()
+        minHeightPx
     )
 
     webView.settings.javaScriptEnabled = true
@@ -159,10 +161,56 @@ object PromotionKit {
                 listener?.onError(promoId, PromotionError.Unknown(e.message ?: ""))
             }
         }
+
+                @android.webkit.JavascriptInterface
+                fun updateHeight(heightPx: Float) {
+                        val contentHeightPx = heightPx.toInt().coerceAtLeast(minHeightPx)
+                        webView.post {
+                                val lp = webView.layoutParams
+                                if (lp.height != contentHeightPx) {
+                                        lp.height = contentHeightPx
+                                        webView.layoutParams = lp
+                                        webView.requestLayout()
+                                }
+                        }
+                }
     }, "PromotionBridge")
 
     webView.webViewClient = object : android.webkit.WebViewClient() {
         override fun onPageFinished(view: WebView, url: String) {
+                        view.evaluateJavascript(
+                                """
+                                (function() {
+                                    function reportHeight() {
+                                        var body = document.body;
+                                        var doc = document.documentElement;
+                                        var h = Math.max(
+                                            body ? body.scrollHeight : 0,
+                                            body ? body.offsetHeight : 0,
+                                            doc ? doc.clientHeight : 0,
+                                            doc ? doc.scrollHeight : 0,
+                                            doc ? doc.offsetHeight : 0
+                                        );
+                                        if (window.PromotionBridge && window.PromotionBridge.updateHeight) {
+                                            window.PromotionBridge.updateHeight(h);
+                                        }
+                                    }
+
+                                    reportHeight();
+                                    window.addEventListener('load', reportHeight);
+                                    window.addEventListener('resize', reportHeight);
+
+                                    if (window.ResizeObserver && document.documentElement) {
+                                        var ro = new ResizeObserver(reportHeight);
+                                        ro.observe(document.documentElement);
+                                    }
+
+                                    setTimeout(reportHeight, 300);
+                                    setTimeout(reportHeight, 1000);
+                                })();
+                                """.trimIndent(),
+                                null
+                        )
             android.util.Log.d("SS-SDK", "Inline loaded: $url")
             listener?.onLoad(promoId)
         }

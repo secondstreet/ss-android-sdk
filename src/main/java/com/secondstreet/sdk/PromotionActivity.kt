@@ -229,7 +229,7 @@ internal class PromotionActivity : AppCompatActivity() {
 
     private fun closePromotion() {
         PromotionKit.notifyClose(promoId)
-        moveTaskToBack(true)
+        finish()
         overridePendingTransition(0, android.R.anim.slide_out_right)
     }
 
