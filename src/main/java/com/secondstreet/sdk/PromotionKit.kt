@@ -10,6 +10,7 @@ import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
 import org.json.JSONObject
 
 object PromotionKit {
@@ -110,115 +111,108 @@ object PromotionKit {
     }
 
     fun inline(
-    context: Context,
-    promoId: String,
-    userId: String? = null,
-    token: String? = null,
-    baseUrl: String = "https://promos.secondstreet.com",
-    heightDp: Int = 400,
-    listener: PromotionListener? = null
+        context: Context,
+        promoId: String,
+        userId: String? = null,
+        token: String? = null,
+        baseUrl: String = "https://promos.secondstreet.com",
+        heightDp: Int = 400,
+        listener: PromotionListener? = null
     ): WebView {
-    this.listener = listener
+        this.listener = listener
 
-    val url = PromotionConfig(
-        promoId = promoId,
-        userId  = userId,
-        token   = token,
-        baseUrl = baseUrl
-    ).buildUrl()
+        val url = PromotionConfig(
+            promoId = promoId,
+            userId = userId,
+            token = token,
+            baseUrl = baseUrl
+        ).buildUrl()
 
-    val minHeightPx = (heightDp * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val minHeightPx = (heightDp * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
-    val webView = WebView(context)
-    webView.layoutParams = android.view.ViewGroup.LayoutParams(
-        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-        minHeightPx
-    )
+        val webView = WebView(context)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
 
-    webView.settings.javaScriptEnabled = true
-    webView.settings.domStorageEnabled = true
+        // Enable auto height
+        webView.isScrollContainer = false
+        webView.settings.loadWithOverviewMode = true
+        webView.settings.useWideViewPort = true
 
-    webView.addJavascriptInterface(object {
-        @android.webkit.JavascriptInterface
-        fun postMessage(message: String) {
-            try {
-                val json  = org.json.JSONObject(message)
-                val event = json.getString("event")
-                val data  = if (json.has("data")) json.getJSONObject("data") else null
-                val map   = data?.keys()?.asSequence()?.associateWith { data.get(it) }
+        webView.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            minHeightPx
+        )
 
-                when (event) {
-                    "secondstreet:route:enter",
-                    "promotion_ready"            -> listener?.onLoad(promoId)
-                    "secondstreet:form:submitted",
-                    "secondstreet:formpage:submitted",
-                    "promotion_complete"         -> listener?.onComplete(promoId, map)
-                    "secondstreet:form:abandoned",
-                    "promotion_close"            -> listener?.onClose(promoId)
-                    else                         -> listener?.onEvent(promoId, event, map)
+        webView.addJavascriptInterface(object {
+            @JavascriptInterface
+            fun postMessage(message: String) {
+                try {
+                    val json = JSONObject(message)
+                    val event = json.getString("event")
+                    val data = if (json.has("data")) json.getJSONObject("data") else null
+                    val map = data?.keys()?.asSequence()?.associateWith { data.get(it) }
+
+                    when (event) {
+                        "secondstreet:route:enter",
+                        "promotion_ready" -> listener?.onLoad(promoId)
+                        "secondstreet:form:submitted",
+                        "secondstreet:formpage:submitted",
+                        "promotion_complete" -> listener?.onComplete(promoId, map)
+                        "secondstreet:form:abandoned",
+                        "promotion_close" -> listener?.onClose(promoId)
+                        else -> listener?.onEvent(promoId, event, map)
+                    }
+                } catch (e: Exception) {
+                    listener?.onError(promoId, PromotionError.Unknown(e.message ?: ""))
                 }
-            } catch (e: Exception) {
-                listener?.onError(promoId, PromotionError.Unknown(e.message ?: ""))
+            }
+        }, "PromotionBridge")
+
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) {
+                if (newProgress == 100) {
+                    view.evaluateJavascript(
+                        """
+                        (function() {
+                            return Math.max(
+                                document.body.scrollHeight,
+                                document.documentElement.scrollHeight
+                            );
+                        })()
+                        """.trimIndent()
+                    ) { height ->
+                        val contentHeight = height
+                            ?.replace("\"", "")
+                            ?.toFloatOrNull()
+                            ?: 0f
+                        if (contentHeight > 0) {
+                            val px = (contentHeight * context.resources.displayMetrics.density)
+                                .toInt()
+                                .coerceAtLeast(minHeightPx)
+                            view.post {
+                                view.layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    px
+                                )
+                                view.requestLayout()
+                            }
+                        }
+                    }
+                }
             }
         }
 
-                @android.webkit.JavascriptInterface
-                fun updateHeight(heightPx: Float) {
-                        val contentHeightPx = heightPx.toInt().coerceAtLeast(minHeightPx)
-                        webView.post {
-                                val lp = webView.layoutParams
-                                if (lp.height != contentHeightPx) {
-                                        lp.height = contentHeightPx
-                                        webView.layoutParams = lp
-                                        webView.requestLayout()
-                                }
-                        }
-                }
-    }, "PromotionBridge")
-
-    webView.webViewClient = object : android.webkit.WebViewClient() {
-        override fun onPageFinished(view: WebView, url: String) {
-                        view.evaluateJavascript(
-                                """
-                                (function() {
-                                    function reportHeight() {
-                                        var body = document.body;
-                                        var doc = document.documentElement;
-                                        var h = Math.max(
-                                            body ? body.scrollHeight : 0,
-                                            body ? body.offsetHeight : 0,
-                                            doc ? doc.clientHeight : 0,
-                                            doc ? doc.scrollHeight : 0,
-                                            doc ? doc.offsetHeight : 0
-                                        );
-                                        if (window.PromotionBridge && window.PromotionBridge.updateHeight) {
-                                            window.PromotionBridge.updateHeight(h);
-                                        }
-                                    }
-
-                                    reportHeight();
-                                    window.addEventListener('load', reportHeight);
-                                    window.addEventListener('resize', reportHeight);
-
-                                    if (window.ResizeObserver && document.documentElement) {
-                                        var ro = new ResizeObserver(reportHeight);
-                                        ro.observe(document.documentElement);
-                                    }
-
-                                    setTimeout(reportHeight, 300);
-                                    setTimeout(reportHeight, 1000);
-                                })();
-                                """.trimIndent(),
-                                null
-                        )
-            android.util.Log.d("SS-SDK", "Inline loaded: $url")
-            listener?.onLoad(promoId)
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                android.util.Log.d("SS-SDK", "Inline loaded: $url")
+                listener?.onLoad(promoId)
+            }
         }
-    }
 
-    webView.loadUrl(url)
-    return webView
-}
+        webView.loadUrl(url)
+        return webView
+    }
 
     // ── Event relay ───────────────────────────────────────────────────────────
     fun notifyLoad(promoId: String)                                             { listener?.onLoad(promoId) }
