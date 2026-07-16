@@ -2,19 +2,21 @@ package com.secondstreet.sdk
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.LinearLayout
+import android.widget.Toast
 
 import android.content.Context
+import android.content.ContextWrapper
+import android.net.Uri
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import org.json.JSONObject
+import androidx.fragment.app.FragmentActivity
 
 object PromotionKit {
 
@@ -129,61 +131,6 @@ object PromotionKit {
         val minHeightPx = (heightDp * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
         val displayMetrics = context.resources.displayMetrics
-        android.util.Log.d(
-            "PromotionKit",
-            "DisplayMetrics density=${displayMetrics.density}, densityDpi=${displayMetrics.densityDpi}, " +
-                "scaledDensity=${displayMetrics.scaledDensity}, widthPx=${displayMetrics.widthPixels}, " +
-                "heightPx=${displayMetrics.heightPixels}, heightDpParam=$heightDp, minHeightPx=$minHeightPx"
-        )
-
-        fun toInlineHeightPx(cssHeight: Float): Int {
-            return (cssHeight * displayMetrics.density).toInt()
-                .coerceAtLeast(minHeightPx)
-        }
-
-        fun applyInlineHeight(view: WebView, px: Int, onApplied: ((Int) -> Unit)? = null) {
-            view.post {
-                val existing = view.layoutParams
-                if (existing != null) {
-                    existing.height = px
-                    view.layoutParams = existing
-                } else {
-                    val newParams = when (view.parent) {
-                        is LinearLayout -> LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            px
-                        )
-                        is FrameLayout -> FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            px
-                        )
-                        is ViewGroup -> ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            px
-                        )
-                        else -> ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            px
-                        )
-                    }
-                    view.layoutParams = newParams
-                }
-                view.requestLayout()
-                val screenHeightPx = context.resources.displayMetrics.heightPixels
-                val parentName = view.parent?.javaClass?.simpleName ?: "null"
-                if (px > screenHeightPx) {
-                    val parentScrollable = parentName.contains("ScrollView") || parentName.contains("RecyclerView")
-                    if (!parentScrollable) {
-                        android.util.Log.w(
-                            "PromotionKit",
-                            "Applied height ($px) is larger than screen height ($screenHeightPx) in non-scrollable parent ($parentName). " +
-                                "Content may appear cut off unless the parent container scrolls or WebView scrolling is enabled."
-                        )
-                    }
-                }
-                onApplied?.invoke(px)
-            }
-        }
 
         val webView = WebView(context)
         webView.settings.javaScriptEnabled = true
@@ -197,125 +144,31 @@ object PromotionKit {
         webView.settings.loadWithOverviewMode = true
         webView.settings.useWideViewPort = true
         webView.minimumHeight = minHeightPx
-
-        fun updateInlineHeight(view: WebView, onApplied: ((Int) -> Unit)? = null) {
-            view.evaluateJavascript(
-                """
-                (function() {
-                    var body = document.body;
-                    var doc = document.documentElement;
-                    return Math.max(
-                        body ? body.scrollHeight : 0,
-                        body ? body.offsetHeight : 0,
-                        doc ? doc.scrollHeight : 0,
-                        doc ? doc.offsetHeight : 0,
-                        doc ? doc.clientHeight : 0
-                    );
-                })()
-                """.trimIndent()
-            ) { height ->
-                val contentHeight = height
-                    ?.replace("\"", "")
-                    ?.toFloatOrNull()
-                    ?: 0f
-                if (contentHeight > 0) {
-                    val px = toInlineHeightPx(contentHeight)
-                    applyInlineHeight(view, px, onApplied)
-                }
-            }
-        }
+        webView.settings.allowFileAccess = true
+        webView.settings.allowContentAccess = true
 
         webView.addJavascriptInterface(object {
             @JavascriptInterface
             fun postMessage(message: String?) {
-                android.util.Log.d("PromotionKit", "🔵 postMessage called with: $message")
-                if (message == null || message == "undefined") {
-                    android.util.Log.d("PromotionKit", "🔴 Received null/undefined, ignoring")
-                    return
-                }
                 try {
-                    val json = JSONObject(message)
-                    val event = json.getString("event")
-                    val data = if (json.has("data")) json.getJSONObject("data") else null
-                    val map = data?.keys()?.asSequence()?.associateWith { data.get(it) }
-
-                    android.util.Log.d("PromotionKit", "🔵 Event type: $event")
+                    val parsed = PromotionInlineBridgeUtils.parseBridgeMessage(message) ?: return
+                    val event = parsed.event
+                    val data = parsed.data
+                    val map = parsed.map
 
                     when (event) {
                         "resize" -> {
-                            android.util.Log.d("PromotionKit", "🟢 RESIZE event received. Raw data: $data")
-                            android.util.Log.d(
-                                "PromotionKit",
-                                "Resize context density=${displayMetrics.density}, densityDpi=${displayMetrics.densityDpi}, " +
-                                    "scaledDensity=${displayMetrics.scaledDensity}"
+                            val heightCssPx = PromotionInlineBridgeUtils.parseResizeCssHeight(data)
+                            val requestedHeightPx = PromotionInlineBridgeUtils.toInlineHeightPx(
+                                cssHeight = heightCssPx,
+                                density = displayMetrics.density,
+                                minHeightPx = minHeightPx
                             )
-                            
-                            // JavaScript height is already the effective rendered height for the page.
-                            val heightCssPx = if (data?.has("height") == true) {
-                                val heightVal = data.get("height")
-                                android.util.Log.d("PromotionKit", "Height value: $heightVal (type: ${heightVal?.javaClass?.simpleName})")
-                                when (heightVal) {
-                                    is Int -> {
-                                        android.util.Log.d("PromotionKit", "Height is Int: $heightVal")
-                                        heightVal.toFloat()
-                                    }
-                                    is Double -> {
-                                        val floatHeight = heightVal.toFloat()
-                                        android.util.Log.d("PromotionKit", "Height is Double: $heightVal -> converted to Float: $floatHeight")
-                                        floatHeight
-                                    }
-                                    is String -> {
-                                        val floatHeight = heightVal.toFloatOrNull() ?: 0f
-                                        android.util.Log.d("PromotionKit", "Height is String: $heightVal -> converted to Float: $floatHeight")
-                                        floatHeight
-                                    }
-                                    else -> {
-                                        android.util.Log.d("PromotionKit", "Height has unexpected type: ${heightVal?.javaClass?.simpleName}")
-                                        0f
-                                    }
-                                }
-                            } else {
-                                android.util.Log.d("PromotionKit", "Height field not found in data")
-                                0f
-                            }
 
-                            val requestedHeightPx = toInlineHeightPx(heightCssPx)
-                            
-                            android.util.Log.d(
-                                "PromotionKit",
-                                "Resize requested height: css=$heightCssPx -> requested=$requestedHeightPx"
-                            )
-                            
                             if (requestedHeightPx > 0) {
-                                webView.post {
-                                    // Re-measure from DOM and ensure height is at least the requested resize value.
-                                    updateInlineHeight(webView) { appliedHeightPx ->
-                                        val finalHeightPx = maxOf(appliedHeightPx, requestedHeightPx)
-                                        if (finalHeightPx != appliedHeightPx) {
-                                            android.util.Log.d(
-                                                "PromotionKit",
-                                                "Measured height under requested size, applying requested height. measured=$appliedHeightPx requested=$requestedHeightPx"
-                                            )
-                                            applyInlineHeight(webView, finalHeightPx) { adjustedHeightPx ->
-                                                android.util.Log.d("PromotionKit", "Applied adjusted inline height: $adjustedHeightPx")
-                                                webView.evaluateJavascript(
-                                                    """javascript:window.PromotionBridge && window.PromotionBridge.postMessage(JSON.stringify({event: 'resize:ack', data: {height: $adjustedHeightPx}}))"""
-                                                ) { result ->
-                                                    android.util.Log.d("PromotionKit", "Sent resize:ack back to webapp. Result: $result")
-                                                }
-                                            }
-                                        } else {
-                                            android.util.Log.d("PromotionKit", "Applied measured inline height: $appliedHeightPx")
-                                            webView.evaluateJavascript(
-                                                """javascript:window.PromotionBridge && window.PromotionBridge.postMessage(JSON.stringify({event: 'resize:ack', data: {height: $appliedHeightPx}}))"""
-                                            ) { result ->
-                                                android.util.Log.d("PromotionKit", "Sent resize:ack back to webapp. Result: $result")
-                                            }
-                                        }
-                                    }
+                                PromotionInlineBridgeUtils.applyInlineHeight(webView, requestedHeightPx) { appliedHeightPx ->
+                                    PromotionInlineBridgeUtils.sendResizeAck(webView, appliedHeightPx)
                                 }
-                            } else {
-                                android.util.Log.w("PromotionKit", "Invalid requestedHeightPx: $requestedHeightPx, skipping resize")
                             }
                         }
                         "secondstreet:route:enter",
@@ -332,59 +185,41 @@ object PromotionKit {
                 }
             }
         }, "PromotionBridge")
-        android.util.Log.d("PromotionKit", "🔵 JavaScript interface 'PromotionBridge' registered")
-
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView, newProgress: Int) {
-                if (newProgress == 100) {
-                    updateInlineHeight(view)
-                }
-            }
-        }
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                android.util.Log.d("PromotionKit", "🔵 onPageStarted: $url")
-                
-                // Wait a tiny bit for the interface to be ready, then inject wrapper
-                view.postDelayed({
-                    android.util.Log.d("PromotionKit", "Installing wrapper via evaluateJavascript...")
-                    view.evaluateJavascript("""
-                        (function() {
-                            console.log('[WRAPPER] Starting wrapper installation');
-                            if (!window.PromotionBridge) {
-                                console.log('[WRAPPER] ERROR: PromotionBridge not available');
-                                return 'NO_BRIDGE';
-                            }
-                            var original = window.PromotionBridge.postMessage;
-                            console.log('[WRAPPER] Original type:', typeof original);
-                            window.PromotionBridge.postMessage = function(msg) {
-                                console.log('[WRAPPER] Intercepted:', JSON.stringify(msg));
-                                if (msg) {
-                                    original(JSON.stringify(msg));
-                                }
-                            };
-                            console.log('[WRAPPER] Wrapper installed');
-                            return 'WRAPPER_READY';
-                        })();
-                    """.trimIndent()) { result ->
-                        android.util.Log.d("PromotionKit", "Wrapper install result: $result")
-                    }
-                }, 100)
-            }
-            
             override fun onPageFinished(view: WebView, url: String) {
-                android.util.Log.d("PromotionKit", "🔵 onPageFinished: $url")
-                updateInlineHeight(view)
-                view.postDelayed({ updateInlineHeight(view) }, 250)
-                view.postDelayed({ updateInlineHeight(view) }, 750)
-                view.postDelayed({ updateInlineHeight(view) }, 1500)
                 listener?.onLoad(promoId)
             }
         }
 
-        android.util.Log.d("PromotionKit", "🔵 Inline view created. Loading URL: $url")
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams
+            ): Boolean {
+                val hostActivity = findHostActivity(context)
+                if (hostActivity !is FragmentActivity) {
+                    filePathCallback.onReceiveValue(null)
+                    Toast.makeText(context, "Inline file chooser requires an Activity context", Toast.LENGTH_SHORT).show()
+                    return false
+                }
+
+                val launched = PromotionInlineFileChooserManager.launch(
+                    activity = hostActivity,
+                    pickerIntent = fileChooserParams.createIntent(),
+                    callback = filePathCallback
+                )
+
+                if (!launched) {
+                    Toast.makeText(context, "Cannot open file chooser", Toast.LENGTH_SHORT).show()
+                    return false
+                }
+
+                return true
+            }
+        }
+
         webView.loadUrl(url)
         
         // Set initial layout params with the specified height
@@ -406,4 +241,10 @@ object PromotionKit {
 
     private fun dpToPx(activity: Activity, dp: Int): Int =
         (dp * activity.resources.displayMetrics.density).toInt()
+
+    private tailrec fun findHostActivity(context: Context): Activity? = when (context) {
+        is Activity -> context
+        is ContextWrapper -> findHostActivity(context.baseContext)
+        else -> null
+    }
 }

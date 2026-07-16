@@ -1,6 +1,7 @@
 package com.secondstreet.sdk
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -8,12 +9,14 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -23,6 +26,8 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import org.json.JSONObject
 
@@ -47,6 +52,15 @@ internal class PromotionActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private lateinit var errorView: TextView
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    private val filePickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val results = PromotionFileChooserUtils.extractResultUris(result.resultCode, result.data)
+        fileChooserCallback?.onReceiveValue(results)
+        fileChooserCallback = null
+    }
 
     private lateinit var promoId: String
     private lateinit var promoUrl: String
@@ -150,6 +164,8 @@ internal class PromotionActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             useWideViewPort      = true
             setSupportZoom(false)
+            allowFileAccess      = true
+            allowContentAccess   = true
         }
 
         webView.addJavascriptInterface(JsBridge(), "PromotionBridge")
@@ -184,6 +200,28 @@ internal class PromotionActivity : AppCompatActivity() {
             }
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 if (newProgress == 100) progressBar.visibility = View.GONE
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams
+            ): Boolean {
+                fileChooserCallback?.onReceiveValue(null)
+                fileChooserCallback = filePathCallback
+
+                return try {
+                    filePickerLauncher.launch(fileChooserParams.createIntent())
+                    true
+                } catch (e: ActivityNotFoundException) {
+                    fileChooserCallback = null
+                    Toast.makeText(
+                        this@PromotionActivity,
+                        "Cannot open file chooser",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    false
+                }
             }
         }
     }
@@ -256,5 +294,11 @@ internal class PromotionActivity : AppCompatActivity() {
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack()
         else closePromotion()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
     }
 }
