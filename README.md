@@ -36,13 +36,12 @@ PromotionKit.show(
 )
 ```
 
-### With user context
+### With test server
 ```kotlin
 PromotionKit.show(
     activity = this,
     promoId  = "your-promo-id",
-    userId   = currentUser.id,
-    token    = currentUser.authToken
+    testServer = "staging"  // Uses https://consumer-qa-staging.secondstreetapp.com
 )
 ```
 
@@ -81,10 +80,14 @@ PromotionKit.show(
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `promoId` | String | required | Your promotion ID |
-| `userId` | String? | null | Optional user ID |
-| `token` | String? | null | Optional auth token |
-| `baseUrl` | String | promos.secondstreet.com | Your platform base URL |
+| `testServer` | String? | null | Optional test server name (uses consumer-qa-{testServer}.secondstreetapp.com) |
 | `heightPercent` | Int | 100 | Screen height % (100 = full, 90 = 90%) |
+| `listener` | PromotionListener? | null | Optional callback listener for events |
+
+## Base URLs
+
+- **Production**: `https://consumer.secondstreetapp.com`
+- **Staging**: `https://consumer-qa-{testServer}.secondstreetapp.com` (when testServer is provided)
 
 ---
 

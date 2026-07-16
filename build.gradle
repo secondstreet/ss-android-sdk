@@ -65,7 +65,7 @@ afterEvaluate {
         publications {
             release(MavenPublication) {
                 from components.release
-                groupId    = 'com.github.nakumar-upland'
+                groupId    = 'com.github.secondstreet'
                 artifactId = 'ss-android-sdk'
                 version    = '1.0.0'
             }
