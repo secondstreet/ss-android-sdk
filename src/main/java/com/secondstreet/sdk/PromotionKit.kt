@@ -170,10 +170,10 @@ object PromotionKit {
                                     val behavior = PromotionInlineBridgeUtils.parseScrollBehavior(data)
                                     val relativeToCurrent = PromotionInlineBridgeUtils.isViewportRelativeOffset(data)
                                     PromotionInlineScrollUtils.handleScrollTo(
-                                        view = webView,
+                                        webView = webView,
                                         offset = offset,
                                         behavior = behavior,
-                                        relativeToCurrent = relativeToCurrent
+                                        relativeToCurrent = relativeToCurrent,
                                         density = density,
                                         pending = pendingScroll
                                     )
