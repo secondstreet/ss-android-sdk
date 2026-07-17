@@ -11,10 +11,10 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Bundle
+import android.os.Message
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -164,6 +164,8 @@ internal class PromotionActivity : AppCompatActivity() {
             loadWithOverviewMode = true
             useWideViewPort      = true
             setSupportZoom(false)
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
             allowFileAccess      = true
             allowContentAccess   = true
         }
@@ -171,6 +173,17 @@ internal class PromotionActivity : AppCompatActivity() {
         webView.addJavascriptInterface(JsBridge(), "PromotionBridge")
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (!request.isForMainFrame) return false
+                val uri = request.url
+                return PromotionLinkHandlingUtils.openIfExternal(this@PromotionActivity, uri, promoUrl)
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                val uri = Uri.parse(url)
+                return PromotionLinkHandlingUtils.openIfExternal(this@PromotionActivity, uri, promoUrl)
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 runOnUiThread {
                     progressBar.visibility = View.GONE
@@ -194,10 +207,6 @@ internal class PromotionActivity : AppCompatActivity() {
         }
 
         webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
-                android.util.Log.d("SS-SDK", "${message.message()} -- ${message.sourceId()}:${message.lineNumber()}")
-                return true
-            }
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 if (newProgress == 100) progressBar.visibility = View.GONE
             }
@@ -223,11 +232,19 @@ internal class PromotionActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            override fun onCreateWindow(
+                view: WebView,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message
+            ): Boolean {
+                return PromotionLinkHandlingUtils.handleCreateWindow(this@PromotionActivity, view, resultMsg)
+            }
         }
     }
 
     private fun loadPromotion() {
-        android.util.Log.d("SS-SDK", "Loading URL: $promoUrl")
         webView.loadUrl(promoUrl)
     }
 

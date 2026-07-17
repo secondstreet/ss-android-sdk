@@ -11,6 +11,7 @@ import android.widget.Toast
 import android.content.Context
 import android.content.ContextWrapper
 import android.net.Uri
+import android.os.Message
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -143,6 +144,8 @@ object PromotionKit {
         webView.overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
         webView.settings.loadWithOverviewMode = true
         webView.settings.useWideViewPort = true
+        webView.settings.setSupportMultipleWindows(true)
+        webView.settings.javaScriptCanOpenWindowsAutomatically = true
         webView.minimumHeight = minHeightPx
         webView.settings.allowFileAccess = true
         webView.settings.allowContentAccess = true
@@ -187,6 +190,17 @@ object PromotionKit {
         }, "PromotionBridge")
 
         webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean {
+                if (!request.isForMainFrame) return false
+                val uri = request.url
+                return PromotionLinkHandlingUtils.openIfExternal(context, uri, url)
+            }
+
+            override fun shouldOverrideUrlLoading(view: WebView, urlString: String): Boolean {
+                val uri = Uri.parse(urlString)
+                return PromotionLinkHandlingUtils.openIfExternal(context, uri, url)
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 listener?.onLoad(promoId)
             }
@@ -218,6 +232,15 @@ object PromotionKit {
 
                 return true
             }
+
+            override fun onCreateWindow(
+                view: WebView,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message
+            ): Boolean {
+                return PromotionLinkHandlingUtils.handleCreateWindow(context, view, resultMsg)
+            }
         }
 
         webView.loadUrl(url)
@@ -247,4 +270,5 @@ object PromotionKit {
         is ContextWrapper -> findHostActivity(context.baseContext)
         else -> null
     }
+
 }
