@@ -132,6 +132,7 @@ object PromotionKit {
         val minHeightPx = (heightDp * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
 
         val displayMetrics = context.resources.displayMetrics
+        val density = displayMetrics.density
 
         val webView = WebView(context)
         webView.settings.javaScriptEnabled = true
@@ -150,41 +151,69 @@ object PromotionKit {
         webView.settings.allowFileAccess = true
         webView.settings.allowContentAccess = true
 
+        val pendingScroll = PromotionInlineScrollUtils.PendingScroll()
+
         webView.addJavascriptInterface(object {
             @JavascriptInterface
             fun postMessage(message: String?) {
-                try {
-                    val parsed = PromotionInlineBridgeUtils.parseBridgeMessage(message) ?: return
-                    val event = parsed.event
-                    val data = parsed.data
-                    val map = parsed.map
+                webView.post {
+                    try {
+                        val parsed = PromotionInlineBridgeUtils.parseBridgeMessage(message) ?: return@post
+                        val event = parsed.event
+                        val data = parsed.data
+                        val map = parsed.map
 
-                    when (event) {
-                        "resize" -> {
-                            val heightCssPx = PromotionInlineBridgeUtils.parseResizeCssHeight(data)
-                            val requestedHeightPx = PromotionInlineBridgeUtils.toInlineHeightPx(
-                                cssHeight = heightCssPx,
-                                density = displayMetrics.density,
-                                minHeightPx = minHeightPx
-                            )
-
-                            if (requestedHeightPx > 0) {
-                                PromotionInlineBridgeUtils.applyInlineHeight(webView, requestedHeightPx) { appliedHeightPx ->
-                                    PromotionInlineBridgeUtils.sendResizeAck(webView, appliedHeightPx)
+                        when (event) {
+                            "scrollTo" -> {
+                                val offset = PromotionInlineBridgeUtils.parseScrollOffset(data)
+                                if (offset != null) {
+                                    val behavior = PromotionInlineBridgeUtils.parseScrollBehavior(data)
+                                    val relativeToCurrent = PromotionInlineBridgeUtils.isViewportRelativeOffset(data)
+                                    PromotionInlineScrollUtils.handleScrollTo(
+                                        view = webView,
+                                        offset = offset,
+                                        behavior = behavior,
+                                        relativeToCurrent = relativeToCurrent
+                                        density = density,
+                                        pending = pendingScroll
+                                    )
                                 }
                             }
+                            "scrollToTop" -> {
+                                val behavior = PromotionInlineBridgeUtils.parseScrollBehavior(data)
+                                PromotionInlineScrollUtils.handleScrollToTop(webView, behavior, pendingScroll)
+                            }
+                            "resize" -> {
+                                val heightCssPx = PromotionInlineBridgeUtils.parseResizeCssHeight(data)
+                                val requestedHeightPx = PromotionInlineBridgeUtils.toInlineHeightPx(
+                                    cssHeight = heightCssPx,
+                                    density = displayMetrics.density,
+                                    minHeightPx = minHeightPx
+                                )
+
+                                if (requestedHeightPx > 0) {
+                                    PromotionInlineBridgeUtils.applyInlineHeight(webView, requestedHeightPx) { appliedHeightPx ->
+                                        PromotionInlineBridgeUtils.sendResizeAck(webView, appliedHeightPx)
+                                        PromotionInlineScrollUtils.replayPendingAfterResize(
+                                            webView = webView,
+                                            density = density,
+                                            pending = pendingScroll
+                                        )
+                                    }
+                                }
+                            }
+                            "secondstreet:route:enter",
+                            "promotion_ready" -> listener?.onLoad(promoId)
+                            "secondstreet:form:submitted",
+                            "secondstreet:formpage:submitted",
+                            "promotion_complete" -> listener?.onComplete(promoId, map)
+                            "secondstreet:form:abandoned",
+                            "promotion_close" -> listener?.onClose(promoId)
+                            else -> listener?.onEvent(promoId, event, map)
                         }
-                        "secondstreet:route:enter",
-                        "promotion_ready" -> listener?.onLoad(promoId)
-                        "secondstreet:form:submitted",
-                        "secondstreet:formpage:submitted",
-                        "promotion_complete" -> listener?.onComplete(promoId, map)
-                        "secondstreet:form:abandoned",
-                        "promotion_close" -> listener?.onClose(promoId)
-                        else -> listener?.onEvent(promoId, event, map)
+                    } catch (e: Exception) {
+                        listener?.onError(promoId, PromotionError.Unknown(e.message ?: ""))
                     }
-                } catch (e: Exception) {
-                    listener?.onError(promoId, PromotionError.Unknown(e.message ?: ""))
                 }
             }
         }, "PromotionBridge")

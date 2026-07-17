@@ -259,6 +259,27 @@ internal class PromotionActivity : AppCompatActivity() {
                     val map   = data?.let { parseJsonObjectToMap(it) }
 
                     when (event) {
+                        "scrollTo" -> {
+                            val offset = PromotionInlineBridgeUtils.parseScrollOffset(data)
+                            if (offset != null) {
+                                val behavior = PromotionInlineBridgeUtils.parseScrollBehavior(data)
+                                val relativeToCurrent = PromotionInlineBridgeUtils.isViewportRelativeOffset(data)
+                                PromotionInlineBridgeUtils.applyScroll(
+                                    view = webView,
+                                    top = offset,
+                                    behavior = behavior,
+                                    relativeToCurrent = relativeToCurrent
+                                )
+                            }
+                        }
+                        "scrollToTop" -> {
+                            val behavior = PromotionInlineBridgeUtils.parseScrollBehavior(data)
+                            PromotionInlineBridgeUtils.applyScroll(
+                                view = webView,
+                                top = 0f,
+                                behavior = behavior
+                            )
+                        }
                         "secondstreet:route:enter",
                         "promotion_ready"             -> PromotionKit.notifyLoad(promoId)
                         "secondstreet:form:submitted",
